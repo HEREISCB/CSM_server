@@ -1,0 +1,33 @@
+# Voice Presets Configuration
+
+voices:
+  default:
+    name: "Default"
+    description: "Default CSM voice with balanced settings"
+    speaker_id: 0
+    temperature: 0.7
+    top_k: 50
+  
+  expressive:
+    name: "Expressive"
+    description: "More expressive and varied output"
+    speaker_id: 0
+    temperature: 0.9
+    top_k: 60
+  
+  stable:
+    name: "Stable"
+    description: "More consistent and stable output"
+    speaker_id: 0
+    temperature: 0.5
+    top_k: 30
+
+# Custom voices (example)
+# custom_voice:
+#   name: "Custom Voice"
+#   description: "Voice cloned from reference audio"
+#   speaker_id: 0
+#   temperature: 0.7
+#   top_k: 50
+#   reference_audio_path: "/path/to/reference.wav"
+#   reference_text: "Text spoken in the reference audio"

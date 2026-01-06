@@ -1,0 +1,141 @@
+# CSM TTS Server - Docker Compose Production Configuration
+
+version: '3.8'
+
+services:
+  # ===========================================================================
+  # TTS Server - Main service
+  # ===========================================================================
+  tts-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    image: csm-tts-server:latest
+    container_name: csm-tts
+    restart: unless-stopped
+    
+    # GPU access
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    
+    # Environment configuration
+    environment:
+      - TTS_HOST=0.0.0.0
+      - TTS_PORT=8080
+      - TTS_DEVICE=cuda
+      - TTS_MODEL_PATH=${TTS_MODEL_PATH:-}
+      - TTS_REQUIRE_AUTH=${TTS_REQUIRE_AUTH:-false}
+      - TTS_API_KEYS=${TTS_API_KEYS:-}
+      - TTS_MAX_CONCURRENT=${TTS_MAX_CONCURRENT:-10}
+      - TTS_MAX_TEXT_LENGTH=${TTS_MAX_TEXT_LENGTH:-4096}
+      - TTS_MAX_AUDIO_MS=${TTS_MAX_AUDIO_MS:-120000}
+      - HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN:-}
+    
+    # Port mapping
+    ports:
+      - "${TTS_EXTERNAL_PORT:-8080}:8080"
+    
+    # Volume mounts
+    volumes:
+      - ./config:/app/config:ro
+      - ./audio:/app/audio
+      - tts-cache:/root/.cache/huggingface
+      - tts-models:/app/models
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    
+    # Logging
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+  # ===========================================================================
+  # Redis (optional - for distributed queuing)
+  # ===========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: csm-tts-redis
+    restart: unless-stopped
+    profiles:
+      - distributed
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ===========================================================================
+  # Prometheus (optional - for metrics collection)
+  # ===========================================================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: csm-tts-prometheus
+    restart: unless-stopped
+    profiles:
+      - monitoring
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+
+  # ===========================================================================
+  # Grafana (optional - for dashboards)
+  # ===========================================================================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: csm-tts-grafana
+    restart: unless-stopped
+    profiles:
+      - monitoring
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - grafana-data:/var/lib/grafana
+
+# ===========================================================================
+# Volumes
+# ===========================================================================
+volumes:
+  tts-cache:
+    name: csm-tts-cache
+  tts-models:
+    name: csm-tts-models
+  redis-data:
+    name: csm-tts-redis
+  prometheus-data:
+    name: csm-tts-prometheus
+  grafana-data:
+    name: csm-tts-grafana
+
+# ===========================================================================
+# Networks
+# ===========================================================================
+networks:
+  default:
+    name: csm-tts-network

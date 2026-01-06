@@ -1,0 +1,51 @@
+# CSM TTS Server Configuration
+
+# Server settings
+server:
+  host: "0.0.0.0"
+  port: 8080
+  workers: 1  # Keep at 1 for single GPU
+
+# Model settings
+model:
+  path: ""  # Empty = download from HuggingFace
+  device: "cuda"
+  dtype: "bfloat16"  # or "float16"
+  compile: true
+  warmup: true
+
+# API settings
+api:
+  require_auth: false
+  api_keys: []  # List of valid API keys
+  
+# Rate limiting
+limits:
+  max_concurrent_requests: 10
+  max_text_length: 4096
+  max_audio_length_ms: 120000
+  request_timeout_seconds: 120
+
+# Audio settings
+audio:
+  sample_rate: 24000
+  default_format: "wav"  # wav, pcm, mp3, opus
+  
+# Voice presets
+voices:
+  default:
+    name: "Default"
+    description: "Default CSM voice"
+    speaker_id: 0
+    temperature: 0.7
+    top_k: 50
+
+# Logging
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  
+# Metrics
+metrics:
+  enabled: true
+  prometheus_path: "/metrics"
