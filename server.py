@@ -183,15 +183,26 @@ class TTSWorker:
         logger.info("TTS worker thread stopped")
 
     def _load_model(self):
-        """Load the CSM model."""
+        """Load the CSM model with CUDA optimizations."""
         logger.info(f"Loading CSM model on {self.device}...")
         
+        # Enable CUDA optimizations
+        if torch.cuda.is_available():
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.benchmark = True
+            torch.backends.cudnn.enabled = True
+            if hasattr(torch.backends.cuda, 'enable_flash_sdp'):
+                torch.backends.cuda.enable_flash_sdp(True)
+            torch.cuda.empty_cache()
+            logger.info("CUDA optimizations enabled (TF32, cuDNN benchmark, Flash SDP)")
+        
+        load_start = time.time()
         if self.model_path:
             self.generator = load_csm_1b_local(self.model_path, self.device)
         else:
             self.generator = load_csm_1b(self.device)
         
-        logger.info("CSM model loaded and warmed up")
+        logger.info(f"CSM model loaded and warmed up in {time.time() - load_start:.1f}s")
         self.ready.set()
 
     def _worker_loop(self):
@@ -239,7 +250,7 @@ class TTSWorker:
         result_queue: asyncio.Queue,
         loop: asyncio.AbstractEventLoop,
     ):
-        """Process a single TTS request."""
+        """Process a single TTS request with detailed timing."""
         logger.info(f"Processing request {request_id}: {request.input[:50]}...")
         start_time = time.time()
         
@@ -248,6 +259,7 @@ class TTSWorker:
         
         # Preprocess text
         text = self._preprocess_text(request.input)
+        preprocess_time = time.time() - start_time
         
         # Estimate max audio length
         words = len(text.split())
@@ -256,8 +268,12 @@ class TTSWorker:
             config.MAX_AUDIO_LENGTH_MS
         )
         
+        logger.info(f"Request {request_id}: {words} words, max {estimated_duration_ms}ms, preprocess {preprocess_time*1000:.1f}ms")
+        
         chunk_count = 0
         first_chunk_time = None
+        total_audio_samples = 0
+        gen_start = time.time()
         
         # Stream generation
         for audio_chunk in self.generator.generate_stream(
@@ -269,10 +285,11 @@ class TTSWorker:
             topk=request.top_k,
         ):
             chunk_count += 1
+            total_audio_samples += audio_chunk.shape[0]
             
             if chunk_count == 1:
-                first_chunk_time = time.time() - start_time
-                logger.info(f"Request {request_id}: First chunk in {first_chunk_time*1000:.1f}ms")
+                first_chunk_time = time.time() - gen_start
+                logger.info(f"Request {request_id}: First chunk from generator in {first_chunk_time*1000:.1f}ms ({audio_chunk.shape[0]} samples)")
             
             # Convert to bytes based on format
             audio_bytes = self._encode_chunk(audio_chunk, request.response_format)
@@ -282,10 +299,14 @@ class TTSWorker:
                 loop
             )
         
+        gen_time = time.time() - gen_start
         total_time = time.time() - start_time
+        audio_seconds = total_audio_samples / 24000
+        rtf = gen_time / audio_seconds if audio_seconds > 0 else 0
+        
         logger.info(
-            f"Request {request_id} complete: {chunk_count} chunks in {total_time:.2f}s "
-            f"(TTFB: {first_chunk_time*1000:.1f}ms)"
+            f"Request {request_id} complete: {chunk_count} chunks, {audio_seconds:.1f}s audio "
+            f"in {gen_time:.2f}s (RTF: {rtf:.2f}x, TTFB: {first_chunk_time*1000:.1f}ms)"
         )
 
     def _get_voice_context(self, voice_id: str) -> List[Segment]:
